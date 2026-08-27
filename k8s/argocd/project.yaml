@@ -1,0 +1,103 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: burty
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: BURTY 백엔드 및 관련 플랫폼 리소스
+
+  sourceRepos:
+    - https://github.com/RosieOh/BURTY-GitOps.git
+
+  destinations:
+    - namespace: burty-dev
+      server: https://kubernetes.default.svc
+    - namespace: burty-prod
+      server: https://kubernetes.default.svc
+    # cert-manager Certificate 가 여기에 들어간다.
+    - namespace: istio-system
+      server: https://kubernetes.default.svc
+
+  # 클러스터 스코프는 필요한 것만 허용. 네임스페이스와 ClusterIssuer 뿐이다.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: cert-manager.io
+      kind: ClusterIssuer
+
+  namespaceResourceBlacklist:
+    # 이 프로젝트가 RBAC 를 만들지 못하게 막는다(권한 상승 경로 차단).
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+
+  roles:
+    - name: developer
+      description: dev 는 sync 가능, prod 는 읽기 전용
+      policies:
+        - p, proj:burty:developer, applications, get, burty/*, allow
+        - p, proj:burty:developer, applications, sync, burty/burty-dev, allow
+        - p, proj:burty:developer, applications, action/*, burty/burty-dev, allow
+      groups:
+        - burty:developers
+    - name: release
+      description: prod sync 권한
+      policies:
+        - p, proj:burty:release, applications, sync, burty/burty-prod, allow
+        - p, proj:burty:release, applications, override, burty/burty-prod, allow
+      groups:
+        - burty:release-managers
+
+  # prod 배포 금지 시간대 — 금요일 저녁 이후와 주말은 막는다.
+  syncWindows:
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 62h
+      applications:
+        - burty-prod
+      manualSync: true   # 장애 대응용 수동 sync 는 허용
+      timeZone: Asia/Seoul
+---
+# 플랫폼 리소스는 별도 프로젝트로 분리한다.
+# burty 프로젝트는 RBAC 생성을 막아 뒀는데(권한 상승 차단), Jenkins 읽기 전용 RoleBinding 은
+# 그게 필요하다. 애플리케이션 배포 권한과 플랫폼 권한을 한 프로젝트에 섞지 않는다.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: burty-platform
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: BURTY 플랫폼 — 인증서, 게이트웨이, 운영도구 노출, Jenkins 부속
+
+  sourceRepos:
+    - https://github.com/RosieOh/BURTY-GitOps.git
+
+  destinations:
+    - { namespace: istio-system,  server: https://kubernetes.default.svc }
+    - { namespace: observability, server: https://kubernetes.default.svc }
+    - { namespace: argocd,        server: https://kubernetes.default.svc }
+    - { namespace: jenkins,       server: https://kubernetes.default.svc }
+    - { namespace: burty-dev,     server: https://kubernetes.default.svc }
+    - { namespace: burty-prod,    server: https://kubernetes.default.svc }
+
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+    - { group: cert-manager.io, kind: ClusterIssuer }
+
+  namespaceResourceBlacklist:
+    # 네임스페이스 Role/RoleBinding 은 허용하되, 클러스터 전역 권한은 위 whitelist 에
+    # 없으므로 애초에 만들 수 없다. ResourceQuota/LimitRange 는 플랫폼팀 소관이 아니다.
+    - { group: "", kind: ResourceQuota }
+    - { group: "", kind: LimitRange }
+
+  roles:
+    - name: platform-admin
+      policies:
+        - p, proj:burty-platform:platform-admin, applications, *, burty-platform/*, allow
+      groups:
+        - burty:platform

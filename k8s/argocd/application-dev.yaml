@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: burty-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: burty
+  source:
+    repoURL: https://github.com/RosieOh/BURTY-GitOps.git
+    # GitOps 레포는 환경별 브랜치를 두지 않는다. 환경 구분은 경로(overlays/*)로 한다.
+    # 브랜치로 나누면 dev→prod 승격이 cherry-pick 이 되고, 두 브랜치가 조용히 벌어진다.
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burty-dev
+  syncPolicy:
+    # dev 는 완전 자동. 커밋되면 알아서 반영되고 손으로 만진 건 되돌린다.
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false        # namespace.yaml 로 라벨까지 함께 관리한다
+      - ServerSideApply=true         # CRD 큰 리소스(Istio) 의 last-applied 어노테이션 크기 문제 회피
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    # StatefulSet 의 PVC 템플릿은 immutable — 컨트롤러가 채운 필드로 항상 OutOfSync 가 뜬다.
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /spec/volumeClaimTemplates

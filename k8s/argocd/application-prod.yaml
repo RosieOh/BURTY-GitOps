@@ -1,0 +1,52 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: burty-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: burty-alerts
+    notifications.argoproj.io/subscribe.on-health-degraded.slack: burty-alerts
+spec:
+  project: burty
+  source:
+    repoURL: https://github.com/RosieOh/BURTY-GitOps.git
+    targetRevision: main
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: burty-prod
+  syncPolicy:
+    # prod 는 자동 sync 를 켜지 않는다.
+    # Jenkins 가 이미지 태그를 커밋한 뒤 승인(input)을 거쳐 `argocd app sync burty-prod` 를 호출한다.
+    # 자동으로 돌리고 싶으면 아래 automated 블록의 주석을 풀고 Jenkinsfile 의 sync 단계를 지울 것.
+    # automated:
+    #   prune: true
+    #   selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - PruneLast=true
+      # prune 이 Secret/PVC 를 지우는 사고를 막는다.
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    # HPA 가 replicas 를 소유한다. 이게 없으면 sync 마다 스케일아웃이 되돌려진다.
+    - group: apps
+      kind: Deployment
+      name: burty-api
+      jsonPointers:
+        - /spec/replicas
+    # Secret 은 SealedSecrets/ESO 가 채운다. ArgoCD 가 값 diff 로 싸우지 않게 한다.
+    - group: ""
+      kind: Secret
+      name: burty-secret
+      jsonPointers:
+        - /data
+  revisionHistoryLimit: 20

@@ -1,0 +1,18 @@
+# 실제 값이 든 파일은 절대 커밋하지 않는다.
+*.secret.yaml
+secret.yaml
+.env
+.env.*
+!.env.example
+
+# kustomize / helm 렌더링 산출물
+/rendered/
+*.rendered.yaml
+
+# 로컬 클러스터 접속 정보
+kubeconfig
+*.kubeconfig
+
+.DS_Store
+.idea/
+.vscode/

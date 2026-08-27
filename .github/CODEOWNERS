@@ -1,0 +1,7 @@
+# 인프라 변경은 전부 리뷰를 거친다.
+*                       @RosieOh
+
+# prod 와 보안 정책은 특히.
+/k8s/overlays/prod/     @RosieOh
+/k8s/base/istio/        @RosieOh
+/k8s/argocd/            @RosieOh

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# AI 도구가 붙이는 공동저자 트레일러를 커밋 전에 차단한다.
+#
+# 활성화:
+#   git config core.hooksPath .githooks
+#
+# CI(.github/workflows/validate.yml)에도 같은 검사가 있지만, push 후에 막히면
+# 이미 로컬 히스토리에 박힌 뒤라 amend/rebase 를 해야 한다. 여기서 먼저 막는다.
+
+msg_file="$1"
+
+if grep -inE 'co-authored-by:.*(claude|anthropic|copilot|cursor)' "$msg_file"; then
+  echo "" >&2
+  echo "커밋 거부: AI 공동저자 트레일러가 포함되어 있습니다." >&2
+  echo "위 줄을 지우고 다시 커밋하세요." >&2
+  exit 1
+fi
+
+exit 0

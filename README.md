@@ -98,6 +98,24 @@ gh api repos/RosieOh/BURTY-GitOps/rulesets --jq '.[] | "\(.id) \(.name) \(.enfor
 
 선택지와 진행 상황은 이슈 "Jenkins 봇을 main 룰셋 bypass 액터로 등록" 에 정리했다.
 
+## 커밋 작성자 정책
+
+커밋에 AI 도구 공동저자 트레일러(`Co-authored-by: Claude ...` 등)를 넣지 않는다.
+한 번 push 되면 제거에 히스토리 재작성 + force push 가 필요하고, 공유 레포에서는
+다른 사람의 클론을 전부 깨뜨린다.
+
+두 겹으로 막는다.
+
+```bash
+git config core.hooksPath .githooks   # 로컬 — 커밋 시점에 차단
+```
+
+CI 의 `정책 검사` job 이 PR 범위의 커밋 메시지를 같은 규칙으로 다시 검사한다.
+
+> GitHub Contributors 그래프는 `.mailmap` 을 참조하지 않는다.
+> 커밋의 author/committer 이메일과 `Co-authored-by` 트레일러로 집계하므로,
+> 기여자 목록을 바꾸려면 커밋 자체를 수정해야 한다.
+
 ## GitHub 부트스트랩
 
 레포·라벨·마일스톤·이슈·프로젝트·PR 을 한 번에 만든다. 멱등하므로 다시 돌려도 안전하다.

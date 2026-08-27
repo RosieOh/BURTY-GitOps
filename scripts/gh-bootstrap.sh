@@ -308,6 +308,55 @@ cmd_project() {
   echo "  https://github.com/users/$OWNER/projects/$num"
 }
 
+# ── 패키지 (GHCR) ───────────────────────────────────────────────────────────
+# 이미지는 앱 레포(FINNECT-BURTY)에서 발행된다. 이 레포는 그걸 소비할 뿐이다.
+# 여기서는 패키지 상태를 확인하고, 클러스터가 끌어올 수 있게 pull secret 을 만든다.
+PKG_OWNER="${PKG_OWNER:-finnect-burty}"
+PKG_NAME="${PKG_NAME:-burty-api}"
+
+cmd_packages() {
+  log "GHCR 패키지 확인 ($PKG_OWNER/$PKG_NAME)"
+
+  local api="orgs/$PKG_OWNER/packages/container/$PKG_NAME"
+  if ! gh api "$api" >/dev/null 2>&1; then
+    # 사용자 네임스페이스일 수도 있다
+    api="users/$PKG_OWNER/packages/container/$PKG_NAME"
+  fi
+
+  if gh api "$api" >/dev/null 2>&1; then
+    gh api "$api" --jq '"  visibility: \(.visibility)  versions: \(.version_count)  updated: \(.updated_at)"'
+    echo "  최근 버전:"
+    gh api "$api/versions" --jq '.[:5][] | "    \(.metadata.container.tags // ["<untagged>"] | join(", "))  \(.name[0:19])"' 2>/dev/null || true
+  else
+    echo "  아직 발행된 패키지가 없습니다."
+    echo "  앱 레포에서 Jenkins 빌드 또는 v*.*.* 태그 push 로 최초 발행하세요."
+  fi
+
+  cat <<'NOTE'
+
+  ── 이후 수동 작업 ────────────────────────────────────────────────────────
+  1) 패키지 ↔ 레포 연결
+     Dockerfile 의 org.opencontainers.image.source 라벨로 자동 연결된다.
+     연결이 안 보이면 패키지 소유자와 레포 소유자가 다른지 확인할 것.
+
+  2) 패키지 가시성
+     REST API 로는 바꿀 수 없다(UI 전용).
+     Package settings → Change visibility
+
+  3) 클러스터 pull secret — private 패키지면 필수
+     kubectl -n burty-prod create secret docker-registry ghcr-pull-secret \
+       --docker-server=ghcr.io \
+       --docker-username=<github-user> \
+       --docker-password=<read:packages PAT>
+     (dev 네임스페이스도 동일하게. base 의 ServiceAccount 가 이 이름을 참조한다)
+
+  4) 보존 정책
+     Package settings → Manage Actions access / retention
+     커밋 SHA 태그가 무한히 쌓인다. 90일 초과 untagged 정리를 걸 것.
+  ──────────────────────────────────────────────────────────────────────────
+NOTE
+}
+
 # ── PR ──────────────────────────────────────────────────────────────────────
 cmd_pr() {
   log "PR 생성"
@@ -397,9 +446,10 @@ case "${1:-all}" in
   milestones) cmd_milestones ;;
   issues)     cmd_issues ;;
   project)    cmd_project ;;
+  packages)   cmd_packages ;;
   pr)         cmd_pr ;;
-  all)        cmd_repo; cmd_labels; cmd_milestones; cmd_issues; cmd_project; cmd_pr ;;
-  *)          echo "사용법: $0 [all|repo|labels|milestones|issues|project|pr]" >&2; exit 1 ;;
+  all)        cmd_repo; cmd_labels; cmd_milestones; cmd_issues; cmd_project; cmd_pr; cmd_packages ;;
+  *)          echo "사용법: $0 [all|repo|labels|milestones|issues|project|packages|pr]" >&2; exit 1 ;;
 esac
 
 printf '\n\033[32m완료\033[0m — https://github.com/%s\n' "$SLUG"

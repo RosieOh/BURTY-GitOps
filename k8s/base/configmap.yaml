@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burty-config
+  labels:
+    app.kubernetes.io/name: burty-api
+data:
+  # ── Spring ────────────────────────────────────────────────────────────────
+  SPRING_PROFILES_ACTIVE: "prod"
+  SPRING_JPA_DDLAUTO: "validate"
+
+  # ── DB / Redis 접속 (호스트는 overlay 또는 Secret 에서 주입) ────────────────
+  DB_PORT: "3306"
+  DB_NAME: "burty"
+  DB_POOL_MAX: "20"
+  DB_POOL_MIN: "5"
+  REDIS_PORT: "6379"
+  BURTY_REDIS_ENABLED: "true"
+
+  # ── URL / CORS / 쿠키 ─────────────────────────────────────────────────────
+  APP_BASE_URL: "https://burty.co.kr"
+  FRONTEND_URL: "https://burty.co.kr"
+  CORS_ALLOWED_ORIGINS: "https://burty.co.kr,https://www.burty.co.kr"
+  COOKIE_DOMAIN: ".burty.co.kr"
+  COOKIE_SECURE: "true"
+  COOKIE_SAMESITE: "Lax"
+  WEBAUTHN_RP_ID: "burty.co.kr"
+
+  # ── 파일 / 로그 ───────────────────────────────────────────────────────────
+  UPLOAD_PATH: "/app/uploads/"
+  LOG_PATH: "/app/logs"
+  LOG_FILE: "/app/logs/application.log"
+
+  # ── JVM ───────────────────────────────────────────────────────────────────
+  # Xmx 고정 대신 컨테이너 메모리 비율. resources.limits.memory 만 바꾸면 힙도 따라 움직인다.
+  JAVA_OPTS: >-
+    -XX:MaxRAMPercentage=75
+    -XX:InitialRAMPercentage=50
+    -XX:+ExitOnOutOfMemoryError
+    -XX:+UseG1GC
+    -Duser.timezone=Asia/Seoul
+    -Dfile.encoding=UTF-8
+    -Dio.grpc.netty.shaded.io.netty.handler.ssl.noOpenSsl=true
+
+  # ── 메일 ──────────────────────────────────────────────────────────────────
+  MAIL_HOST: "smtp.gmail.com"
+  MAIL_PORT: "587"
+
+  # ── 트레이싱 ──────────────────────────────────────────────────────────────
+  MANAGEMENT_TRACING_ENABLED: "true"
+  TRACING_SAMPLING_PROBABILITY: "0.2"
+  OTEL_SERVICE_NAME: "BURTY"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://opentelemetry-collector.observability.svc.cluster.local:4318"
+  MANAGEMENT_OTLP_TRACING_ENDPOINT: "http://opentelemetry-collector.observability.svc.cluster.local:4318/v1/traces"
+
+  # ── Grafana 임베딩 (burty.grafana.*) ──────────────────────────────────────
+  BURTY_GRAFANA_ENABLED: "true"
+  GRAFANA_BASE_URL: "http://kube-prometheus-stack-grafana.observability.svc.cluster.local"
+  BURTY_GRAFANA_PUBLIC_BASE_URL: "https://grafana.burty.co.kr"

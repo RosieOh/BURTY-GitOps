@@ -1,0 +1,42 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: burty-api
+  labels:
+    app.kubernetes.io/name: burty-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: burty-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # request(300m) 기준. limit 을 두지 않으므로 실제 여유는 이보다 크다.
+          averageUtilization: 70
+    # ⚠️ 메모리 기반 스케일링을 의도적으로 넣지 않았다.
+    #    JVM 은 MaxRAMPercentage=75 만큼 힙을 잡고 GC 후에도 OS 에 잘 반환하지 않는다.
+    #    HPA 의 memory utilization 은 limits 가 아니라 **requests** 기준이라
+    #    (request 500Mi~1Gi vs 힙 상한 1.1~1.5Gi) 부하와 무관하게 항상 100% 를 넘겨
+    #    파드가 maxReplicas 에 영구 고정된다. 메모리 압박은 BurtyJvmHeapHigh /
+    #    BurtyPodOOMKilled 알람으로 잡고, 스케일링은 CPU 로만 한다.
+  behavior:
+    scaleUp:
+      # 트래픽 스파이크에 빠르게 붙되, 한 번에 2배 이상 늘리지 않는다.
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+    scaleDown:
+      # JVM 워밍업 비용이 크므로 축소는 보수적으로.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

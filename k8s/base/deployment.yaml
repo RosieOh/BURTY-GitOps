@@ -1,0 +1,143 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: burty-api
+  labels:
+    app.kubernetes.io/name: burty-api
+    app.kubernetes.io/component: backend
+spec:
+  # replicas 는 overlay(HPA)가 관리한다. base 에서 고정하면 ArgoCD 가 HPA 와 싸운다.
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: burty-api
+        app.kubernetes.io/component: backend
+        # DestinationRule subset / 카나리 분기용
+        version: stable
+      annotations:
+        # 앱 컨테이너보다 istio-proxy 가 먼저 Ready 가 되도록 강제한다.
+        # 없으면 부팅 직후 아웃바운드(DB·외부 API) 호출이 sidecar 미기동으로 실패한다.
+        proxy.istio.io/config: |
+          holdApplicationUntilProxyStarts: true
+          terminationDrainDuration: 45s
+        # Istio 가 앱 /actuator/prometheus 를 envoy 메트릭과 합쳐 15020 에 재노출한다.
+        # (mTLS STRICT 상태에서 Prometheus 가 8080 을 직접 긁지 못하는 문제를 이걸로 우회)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: burty-api
+      # graceful shutdown 30s(spring.lifecycle.timeout-per-shutdown-phase) + preStop 10s + 여유
+      terminationGracePeriodSeconds: 75
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: burty-api
+      containers:
+        - name: burty-api
+          image: ghcr.io/rosieoh/burty-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: burty-config
+            - secretRef:
+                name: burty-secret
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # 트레이스에 pod 단위 식별자를 남긴다.
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.name=BURTY,service.namespace=$(POD_NAMESPACE),service.instance.id=$(POD_NAME)
+          # liveness 는 JVM 만 본다. DB 가 흔들릴 때 전 파드를 재시작시키면 장애가 증폭된다.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          # readiness 도 DB 를 보지 않는다(readinessState 만).
+          # DB 장애 시 모든 파드가 동시에 endpoint 에서 빠져 503 이 아니라 연결 거부로 바뀌는 걸 막는다.
+          # DB 상태는 /health 와 PrometheusRule(BurtyDbDown)로 관측한다.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Flyway 마이그레이션 + JPA 초기화까지 최대 5분(30 x 10s) 허용
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          lifecycle:
+            preStop:
+              exec:
+                # kube-proxy/Istio 가 endpoint 제거를 전파할 시간을 벌고 나서 SIGTERM 을 받는다.
+                command: ["sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 300m
+              memory: 768Mi
+            limits:
+              # CPU limit 은 두지 않는다. JVM GC/부팅 구간에서 throttling 이 지연으로 직결된다.
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+            - name: uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        # 로그는 stdout(CONSOLE appender)이 1차 수집 경로다. 파일 appender 는 컨테이너 로컬로만 둔다.
+        - name: logs
+          emptyDir:
+            sizeLimit: 2Gi
+        # base 는 emptyDir. 다중 replica 운영에서는 overlay 에서 RWX PVC 로 교체한다.
+        - name: uploads
+          emptyDir:
+            sizeLimit: 1Gi

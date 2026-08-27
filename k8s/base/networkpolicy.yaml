@@ -1,0 +1,81 @@
+# 기본 차단 + 필요한 경로만 허용.
+# 주의: Istio mTLS 는 L7, NetworkPolicy 는 L3/L4 다. 둘은 대체 관계가 아니라 보완 관계다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: burty-api-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: burty-api-allow-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  policyTypes: [Ingress]
+  ingress:
+    # Istio ingress gateway → 앱
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Prometheus → istio-proxy 병합 메트릭(15020) / 앱 메트릭(8080)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+      ports:
+        - port: 15020
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+    # kubelet probe 는 노드에서 오므로 podSelector 로 못 잡는다 → 전 대역 8080 허용이 필요한
+    # CNI 가 있다. Cilium/Calico 는 host-network 예외를 자동 처리하니 우선 위 규칙만 둔다.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: burty-api-allow-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  policyTypes: [Egress]
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # 같은 네임스페이스(dev 의 in-cluster MariaDB/Redis)
+    - to:
+        - podSelector: {}
+    # istiod (sidecar xDS) / 관측 스택
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+    # 외부 (RDS/ElastiCache/오픈뱅킹/소셜/SMTP). 세밀한 통제는 Istio ServiceEntry +
+    # outboundTrafficPolicy=REGISTRY_ONLY 로 한다. (istio/serviceentry.yaml 참고)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32   # IMDS 차단 (SSRF 로 노드 크리덴셜 탈취 방지)

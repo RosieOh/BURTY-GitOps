@@ -152,7 +152,7 @@ argocd app sync burty-platform && argocd app sync burty-dev
 
 | 위치 | 값 |
 |---|---|
-| `base/kustomization.yaml`, `overlays/*/kustomization.yaml` | `ghcr.io/rosieoh/burty-api` → 실제 레지스트리 |
+| `base/kustomization.yaml`, `overlays/*/kustomization.yaml` | `ghcr.io/finnect-burty/burty-api` → 실제 레지스트리 |
 | `overlays/prod/kustomization.yaml` | `newTag: REPLACE-BY-JENKINS` (첫 배포 전 수동 1회) |
 | `overlays/prod/external-datastores.yaml` | RDS / ElastiCache 엔드포인트 |
 | `overlays/prod/uploads-pvc.yaml` | `storageClassName: efs-sc` |

@@ -13,8 +13,8 @@ resources:
   - externalsecret.yaml
 
 images:
-  - name: ghcr.io/rosieoh/burty-api
-    newName: ghcr.io/rosieoh/burty-api
+  - name: ghcr.io/finnect-burty/burty-api
+    newName: ghcr.io/finnect-burty/burty-api
     # Jenkins 가 `kustomize edit set image` 로 이 값을 커밋 SHA 로 바꿔 push 한다.
     # latest/floating 태그를 쓰면 ArgoCD 가 롤백할 대상을 잃는다 — 반드시 불변 태그.
     newTag: REPLACE-BY-JENKINS

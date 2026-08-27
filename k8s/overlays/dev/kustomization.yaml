@@ -12,8 +12,8 @@ resources:
 
 
 images:
-  - name: ghcr.io/rosieoh/burty-api
-    newName: ghcr.io/rosieoh/burty-api
+  - name: ghcr.io/finnect-burty/burty-api
+    newName: ghcr.io/finnect-burty/burty-api
     newTag: develop   # Jenkins 가 `kustomize edit set image` 로 커밋 SHA 태그를 밀어넣는다
 
 patches:

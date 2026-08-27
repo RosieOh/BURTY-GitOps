@@ -24,5 +24,5 @@ resources:
 # secret.example.yaml 은 의도적으로 제외. 실제 Secret 은 SealedSecrets/ESO 로 별도 반입한다.
 
 images:
-  - name: ghcr.io/rosieoh/burty-api
+  - name: ghcr.io/finnect-burty/burty-api
     newTag: latest

@@ -55,7 +55,7 @@ spec:
               app.kubernetes.io/name: burty-api
       containers:
         - name: burty-api
-          image: ghcr.io/rosieoh/burty-api:latest
+          image: ghcr.io/finnect-burty/burty-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

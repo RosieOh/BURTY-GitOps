@@ -48,17 +48,45 @@ cmd_repo() {
   git push -u origin main
   ok "main 푸시"
 
-  # 매니페스트 검증이 통과해야 병합되도록 강제. private 레포는 플랜에 따라 실패할 수 있어 무시한다.
-  gh api -X PUT "repos/$SLUG/branches/main/protection" \
-    -H "Accept: application/vnd.github+json" \
-    -f 'required_status_checks[strict]=true' \
-    -f 'required_status_checks[contexts][]=매니페스트 검증' \
-    -f 'required_status_checks[contexts][]=정책 검사' \
-    -F 'enforce_admins=false' \
-    -F 'required_pull_request_reviews[required_approving_review_count]=1' \
-    -F 'restrictions=null' >/dev/null 2>&1 \
-    && ok "main 브랜치 보호 설정" \
-    || echo "  · 브랜치 보호 실패 (private 레포 플랜 제한일 수 있음 — 수동 설정 필요)"
+  # 레거시 branches/*/protection API 는 private 레포에서 플랜 제한에 걸린다.
+  # ruleset API 는 무료 private 레포에서도 동작한다.
+  #
+  # ⚠️ required_status_checks 는 **직접 push 도 막는다**. Jenkins 가 이미지 태그를
+  #    main 에 직접 커밋하므로, 봇을 bypass_actors 에 넣기 전에는 파이프라인이 실패한다.
+  #    (자세한 내용과 선택지는 이슈 참조 — "Jenkins 봇을 main 룰셋 bypass 액터로 등록")
+  if gh api "repos/$SLUG/rulesets" --jq '.[].name' 2>/dev/null | grep -Fqx "main 보호"; then
+    skip "main 룰셋"
+  else
+    gh api -X POST "repos/$SLUG/rulesets" --input - >/dev/null <<'JSON' && ok "main 룰셋 설정"
+{
+  "name": "main 보호",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "매니페스트 검증" },
+          { "context": "정책 검사" }
+        ]
+      }
+    }
+  ]
+}
+JSON
+  fi
+
+  # 저장소 설정 — squash 만 허용하고 병합 후 브랜치를 지운다.
+  gh repo edit "$SLUG" \
+    --add-topic kubernetes --add-topic istio --add-topic argocd \
+    --add-topic jenkins --add-topic gitops --add-topic kustomize \
+    --delete-branch-on-merge \
+    --enable-squash-merge --enable-merge-commit=false --enable-rebase-merge=false \
+    >/dev/null 2>&1 && ok "저장소 설정" || true
 }
 
 # ── 라벨 ────────────────────────────────────────────────────────────────────

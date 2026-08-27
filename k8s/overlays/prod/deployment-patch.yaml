@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: burty-api
+spec:
+  template:
+    spec:
+      # 같은 노드/AZ 에 몰리지 않게 유도한다.
+      # required 로 걸면 노드 수 < maxReplicas(6) 인 순간 HPA 스케일아웃이 Pending 으로 막힌다.
+      # preferred + base 의 topologySpreadConstraints 조합이 실무에서 안전하다.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: burty-api
+                topologyKey: kubernetes.io/hostname
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: burty-api
+                topologyKey: topology.kubernetes.io/zone
+      containers:
+        - name: burty-api
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+      volumes:
+        # 업로드 파일은 replica 간 공유가 필요하다 → RWX.
+        # ⚠️ 파일 저장(file.storage.upload-dir)은 중기적으로 S3 로 옮기는 게 맞다.
+        #    RWX PVC(EFS)는 지연·비용·정합성 모두에서 임시방편이다.
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: burty-uploads

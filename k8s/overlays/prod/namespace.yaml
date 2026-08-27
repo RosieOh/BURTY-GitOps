@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: burty-prod
+  labels:
+    istio-injection: enabled
+    kubernetes.io/metadata.name: burty-prod
+    # PodSecurity Admission.
+    # ⚠️ restricted 로 올리지 말 것 — istio-init 컨테이너가 NET_ADMIN/NET_RAW 를 요구해서
+    #    사이드카 주입이 통째로 거부된다. restricted 를 쓰려면 Istio CNI 플러그인(또는
+    #    ambient 모드)으로 전환해 init 컨테이너를 없애야 한다.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

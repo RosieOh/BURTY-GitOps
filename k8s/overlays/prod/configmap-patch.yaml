@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burty-config
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SPRING_JPA_DDLAUTO: "validate"
+  # DB_HOST / REDIS_HOST 는 RDS/ElastiCache 엔드포인트라 Secret 으로 주입한다.
+  # (엔드포인트 자체가 공격 표면 정보이므로 ConfigMap 에 두지 않는다)
+  DB_POOL_MAX: "20"
+  DB_POOL_MIN: "5"
+  TRACING_SAMPLING_PROBABILITY: "0.2"

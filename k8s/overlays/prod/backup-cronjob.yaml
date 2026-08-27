@@ -1,0 +1,118 @@
+# infra/scripts/backup-mariadb.sh 이식.
+#
+# ⚠️ 이건 **2차 백업**이다. prod 1차 백업은 RDS 자동 백업(PITR) + 스냅샷이다.
+#    이 CronJob 의 목적은 다음 두 가지다:
+#      1) 논리 덤프 — 테이블 단위 복구, 다른 엔진/계정으로의 이전
+#      2) 계정 밖(S3) 보관 — RDS 계정이 통째로 날아가는 시나리오 대비
+#
+# 동작: initContainer 가 mysqldump 로 emptyDir 에 덤프 → 메인 컨테이너가 S3 로 올린다.
+#       공식 이미지만 쓰기 위해 두 단계로 나눴다(mariadb 이미지에는 aws-cli 가 없다).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: burty-db-backup
+spec:
+  # 매일 03:20 KST. 월간 리포트 배치(09:00)와 겹치지 않는 시간대.
+  schedule: "20 3 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  # 컨트롤러가 멈춰 있던 사이의 스케줄을 뒤늦게 몰아 실행하지 않는다.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 5400
+      template:
+        metadata:
+          annotations:
+            # Job 은 사이드카가 살아 있으면 Complete 로 넘어가지 못한다.
+            # (K8s 1.29+ native sidecar 를 쓰는 Istio 버전이면 이 애노테이션은 불필요)
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: burty-db-backup
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            fsGroup: 65534
+          initContainers:
+            - name: dump
+              image: mariadb:11
+              command:
+                - sh
+                - -ceu
+                - |
+                  TS=$(date +%Y%m%d_%H%M%S)
+                  OUT="/backup/burty_${DB_NAME}_${TS}.sql.gz"
+                  echo "[backup] dumping ${DB_NAME} from ${DB_HOST}:${DB_PORT}"
+                  # --single-transaction: InnoDB 를 락 없이 일관된 스냅샷으로 덤프
+                  # --routines/--triggers: 프로시저·트리거 포함
+                  mariadb-dump \
+                    -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+                    --single-transaction --routines --triggers \
+                    --default-character-set=utf8mb4 \
+                    "$DB_NAME" | gzip -9 > "$OUT"
+                  ls -lh "$OUT"
+                  # 덤프가 비었는데 성공으로 끝나는 사고를 막는다(gzip 헤더만 20바이트).
+                  [ "$(stat -c %s "$OUT")" -gt 1024 ] || { echo "덤프가 비정상적으로 작습니다"; exit 1; }
+              env:
+                - name: DB_NAME
+                  valueFrom:
+                    configMapKeyRef: { name: burty-config, key: DB_NAME }
+                - name: DB_PORT
+                  valueFrom:
+                    configMapKeyRef: { name: burty-config, key: DB_PORT }
+                - name: DB_HOST
+                  valueFrom:
+                    secretKeyRef: { name: burty-secret, key: DB_HOST }
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef: { name: burty-secret, key: DB_USER }
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: burty-secret, key: DB_PASSWORD }
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+              resources:
+                requests: { cpu: 200m, memory: 512Mi }
+                limits: { memory: 1Gi }
+          containers:
+            - name: upload
+              image: amazon/aws-cli:2.17.0
+              command:
+                - sh
+                - -ceu
+                - |
+                  # 서버사이드 암호화 필수. 개인 금융정보 덤프다.
+                  aws s3 cp /backup/ "s3://${BACKUP_BUCKET}/mariadb/" \
+                    --recursive --sse aws:kms --only-show-errors
+                  echo "[backup] uploaded to s3://${BACKUP_BUCKET}/mariadb/"
+                  # 보존은 S3 Lifecycle 로 건다(스크립트의 find -mtime 대체).
+                  # 버킷에 Object Lock + 버전 관리를 켜두면 랜섬웨어 시나리오까지 커버된다.
+              env:
+                - name: BACKUP_BUCKET
+                  value: REPLACE-burty-db-backup
+                - name: AWS_REGION
+                  value: ap-northeast-2
+                # 65534 로 돌아 홈 디렉터리가 없다. aws-cli 가 쓰기 가능한 HOME 을 요구한다.
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 512Mi }
+          volumes:
+            - name: backup
+              emptyDir:
+                sizeLimit: 20Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: burty-db-backup
+  annotations:
+    # IRSA — S3 PutObject 권한만 가진 역할. 액세스 키를 Secret 에 두지 않는다.
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE:role/burty-db-backup

@@ -1,0 +1,33 @@
+# prod 는 RDS(MariaDB) / ElastiCache(Redis) 를 쓴다.
+# 앱은 Secret 의 DB_HOST / REDIS_HOST 로 직접 붙는다. 아래 ServiceEntry 는 두 가지 목적:
+#   1) outboundTrafficPolicy=REGISTRY_ONLY 환경에서 egress 허용
+#   2) 외부 DB 호출을 Istio 메트릭에 노출 (커넥션 실패/지연을 Grafana 에서 관측)
+#
+# ⚠️ 아래 호스트는 실제 엔드포인트로 반드시 교체할 것. Secret 의 DB_HOST 와 문자열이 정확히 같아야 한다.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-mariadb
+spec:
+  hosts:
+    - burty-prod.REPLACE.ap-northeast-2.rds.amazonaws.com
+  ports:
+    - number: 3306
+      name: tcp-mysql
+      protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-redis
+spec:
+  hosts:
+    - burty-prod.REPLACE.cache.amazonaws.com
+  ports:
+    - number: 6379
+      name: tcp-redis
+      protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL

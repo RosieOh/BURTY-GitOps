@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: burty-prod
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - uploads-pvc.yaml
+  - external-datastores.yaml
+  - backup-cronjob.yaml
+  # ESO 를 쓰지 않는다면 아래 줄을 주석 처리하고 Secret 을 수동으로 반입한다.
+  - externalsecret.yaml
+
+images:
+  - name: ghcr.io/rosieoh/burty-api
+    newName: ghcr.io/rosieoh/burty-api
+    # Jenkins 가 `kustomize edit set image` 로 이 값을 커밋 SHA 로 바꿔 push 한다.
+    # latest/floating 태그를 쓰면 ArgoCD 가 롤백할 대상을 잃는다 — 반드시 불변 태그.
+    newTag: REPLACE-BY-JENKINS
+
+patches:
+  - path: deployment-patch.yaml
+  - path: configmap-patch.yaml
+
+# replicas 는 여기서 고정하지 않는다. HPA(min 2 / max 6)가 소유하고,
+# ArgoCD Application 의 ignoreDifferences 가 /spec/replicas 를 무시하게 되어 있다.
+# 여기서 count 를 박으면 sync 마다 HPA 가 늘려놓은 파드를 되돌린다.

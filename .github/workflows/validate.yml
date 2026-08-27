@@ -1,0 +1,89 @@
+name: Validate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# 렌더링이 깨진 매니페스트가 main 에 들어가면 ArgoCD 가 Unknown 상태로 멈춘다.
+# 클러스터가 아니라 여기서 잡는다.
+jobs:
+  manifests:
+    name: 매니페스트 검증
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: '5.4.3'
+
+      # patch target 오타, 없는 리소스 참조가 여기서 걸린다.
+      - name: kustomize build
+        run: |
+          set -euo pipefail
+          for overlay in k8s/overlays/dev k8s/overlays/prod k8s/platform; do
+            echo "::group::$overlay"
+            kustomize build "$overlay" > "/tmp/$(basename "$overlay").yaml"
+            echo "::endgroup::"
+          done
+
+      - name: Setup kubeconform
+        run: |
+          curl -sSLo /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/
+
+      # CRD(Istio / cert-manager / Prometheus Operator / ESO)는 기본 스키마에 없다.
+      # datreeio CRD 카탈로그를 붙여야 오타가 잡힌다.
+      - name: kubeconform
+        run: |
+          set -euo pipefail
+          for f in /tmp/dev.yaml /tmp/prod.yaml /tmp/platform.yaml; do
+            echo "::group::$f"
+            kubeconform -strict -summary -verbose=false \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+              -skip CustomResourceDefinition \
+              "$f"
+            echo "::endgroup::"
+          done
+
+  policy:
+    name: 정책 검사
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 시크릿이 평문으로 커밋되는 사고를 여기서 막는다.
+      # base/secret.example.yaml 은 전부 REPLACE 라 통과한다.
+      - name: 평문 Secret 커밋 방지
+        run: |
+          set -euo pipefail
+          if grep -rn --include='*.yaml' -E '^\s*(JWT_SECRET|DB_PASSWORD|BURTY_FIELD_ENCRYPTION_KEY|OPENAI_API_KEY):' k8s/ \
+             | grep -vE 'REPLACE|dev-only|secretKeyRef|configMapKeyRef|k8s/overlays/dev/|:\s*""\s*$'; then
+            echo "::error::실제 시크릿 값으로 보이는 항목이 있습니다"
+            exit 1
+          fi
+
+      # prod 이미지 태그가 floating 이면 ArgoCD 가 롤백할 대상을 잃는다.
+      - name: prod 이미지 태그 불변성 검사
+        run: |
+          set -euo pipefail
+          if grep -qE 'newTag:\s*(latest|main|develop)\s*$' k8s/overlays/prod/kustomization.yaml; then
+            echo "::error::prod 는 불변 태그만 허용합니다 (latest/main/develop 금지)"
+            exit 1
+          fi
+
+      # 남아 있는 REPLACE 를 경고로만 알린다. 실제 값 주입 전에는 정상 상태다.
+      - name: 미치환 placeholder 리포트
+        run: |
+          set +e
+          echo "### 남은 placeholder" >> "$GITHUB_STEP_SUMMARY"
+          grep -rn 'REPLACE' k8s/ | sed 's/^/- /' >> "$GITHUB_STEP_SUMMARY"
+          exit 0

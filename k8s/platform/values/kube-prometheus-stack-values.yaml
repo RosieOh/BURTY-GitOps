@@ -1,0 +1,99 @@
+# helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#   -n observability -f kube-prometheus-stack-values.yaml
+prometheus:
+  prometheusSpec:
+    # 기본값(true)이면 이 릴리스 라벨이 붙은 것만 수집한다.
+    # base/observability/*.yaml 에 `release: kube-prometheus-stack` 라벨을 달아 뒀다.
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # dev/prod 양쪽 네임스페이스에 동일한 PrometheusRule 이 배포된다.
+    # 이 옵션이 없으면 같은 알람이 두 번 발화하고, dev 장애로 운영 온콜이 깨어난다.
+    # Operator 가 모든 rule expr 과 스크랩 메트릭에 namespace 매처를 자동 주입한다.
+    enforcedNamespaceLabel: namespace
+
+    retention: 15d
+    retentionSize: 40GB
+    scrapeInterval: 15s
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        memory: 4Gi
+
+grafana:
+  # 기존 grafana provisioning/datasources.yml + dashboards.yml 을 대체한다.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+  additionalDataSources:
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.observability.svc.cluster.local:3100
+      jsonData:
+        # 트레이스 → 로그 역방향 점프
+        tracesToLogsV2:
+          datasourceUid: loki
+          filterByTraceID: true
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        # 로그 → 트레이스 점프. requestId 를 structured metadata 로 넣어 둔 이유다.
+        derivedFields:
+          - name: TraceID
+            matcherRegex: '"trace_id":"(\w+)"'
+            url: '$${__value.raw}'
+            datasourceUid: tempo
+  grafana.ini:
+    security:
+      # 앱의 Grafana 임베딩(burty.grafana.embed)이 iframe 을 쓴다.
+      allow_embedding: true
+    users:
+      allow_sign_up: false
+    server:
+      root_url: https://grafana.burty.co.kr
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# Istio 가 이미 노드/파드 메트릭을 일부 제공하지만, kube-state-metrics 는 그대로 필요하다
+# (PrometheusRule 의 kube_pod_container_status_restarts_total 이 여기서 나온다).
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+
+alertmanager:
+  config:
+    route:
+      group_by: [alertname, namespace]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: burty-default
+      routes:
+        - matchers: [severity="critical"]
+          receiver: burty-critical
+          repeat_interval: 1h
+    receivers:
+      - name: burty-default
+      - name: burty-critical
+        # webhook_configs / slack_configs 를 여기에. URL 은 Secret 참조로 뺄 것.

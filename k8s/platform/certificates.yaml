@@ -1,0 +1,68 @@
+# certbot(호스트 볼륨) → cert-manager 이관.
+# 갱신 후 nginx -s reload 하던 12시간 루프가 사라진다. Istio 는 Secret 변경을 자동 감지한다.
+#
+# ⚠️ Certificate 는 **istio-system** 네임스페이스에 있어야 한다.
+#    Gateway 의 credentialName 은 게이트웨이 파드가 있는 네임스페이스에서 Secret 을 찾는다.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: burty-tls
+  namespace: istio-system
+spec:
+  secretName: burty-tls
+  duration: 2160h    # 90d
+  renewBefore: 720h  # 30d
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: burty.co.kr
+  dnsNames:
+    - burty.co.kr
+    - www.burty.co.kr
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: burty-dev-tls
+  namespace: istio-system
+spec:
+  secretName: burty-dev-tls
+  duration: 2160h
+  renewBefore: 720h
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: dev.burty.co.kr
+  dnsNames:
+    - dev.burty.co.kr
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+# 운영 도구용 SAN 인증서 (grafana / argocd / jenkins)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: burty-platform-tls
+  namespace: istio-system
+spec:
+  secretName: burty-platform-tls
+  duration: 2160h
+  renewBefore: 720h
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  commonName: grafana.burty.co.kr
+  dnsNames:
+    - grafana.burty.co.kr
+    - argocd.burty.co.kr
+    - jenkins.burty.co.kr
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always

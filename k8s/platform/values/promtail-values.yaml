@@ -1,0 +1,45 @@
+# helm upgrade --install promtail grafana/promtail -n observability -f promtail-values.yaml
+#
+# 기존 promtail-config.yml 은 호스트 볼륨(/var/log/burty/*.log)을 tail 했다.
+# K8s 에서는 컨테이너 stdout(CONSOLE appender)을 DaemonSet 이 수집한다.
+# 파일 appender 는 컨테이너 안 emptyDir 로만 남으며 수집 경로가 아니다.
+config:
+  clients:
+    - url: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+  snippets:
+    pipelineStages:
+      # containerd 런타임의 CRI 로그 래퍼를 먼저 벗긴다.
+      - cri: {}
+      # 그 다음 logback CONSOLE 패턴을 파싱한다. (기존 promtail-config.yml 의 regex 그대로)
+      # %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{requestId}] %logger{36} - %msg%n
+      - match:
+          selector: '{app_kubernetes_io_name="burty-api"}'
+          stages:
+            - regex:
+                expression: '^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[(?P<thread>[^\]]+)\] (?P<level>\S+) \[(?P<requestId>[^\]]*)\] (?P<logger>\S+) - (?P<message>.*)$'
+            - labels:
+                level:
+                logger:
+            # requestId 는 카디널리티가 무한대다. 라벨이 아니라 structured metadata 로 둔다.
+            # (기존 설정은 라벨로 넣었는데, Loki 인덱스가 폭발하는 전형적인 안티패턴이다)
+            - structured_metadata:
+                requestId:
+            - timestamp:
+                source: ts
+                format: '2006-01-02 15:04:05.000'
+                location: Asia/Seoul
+
+    common:
+      - action: replace
+        source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        target_label: app_kubernetes_io_name
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+tolerations:
+  - operator: Exists

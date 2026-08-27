@@ -1,0 +1,43 @@
+# init-letsencrypt.sh + certbot 컨테이너를 대체한다.
+# HTTP-01 은 Istio Gateway 와 함께 쓸 때 solver Ingress 가 필요해 번거롭다.
+# Route53 을 쓴다면 DNS-01 이 훨씬 단순하고 와일드카드도 된다.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: REPLACE@burty.co.kr
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      # (A) DNS-01 / Route53 — 권장
+      - dns01:
+          route53:
+            region: ap-northeast-2
+            # IRSA 로 권한을 주는 편이 accessKey 를 Secret 에 두는 것보다 안전하다.
+            # hostedZoneID: REPLACE
+        selector:
+          dnsZones:
+            - burty.co.kr
+      # (B) HTTP-01 대안 — Istio Gateway 를 solver 로 사용
+      # - http01:
+      #     ingress:
+      #       class: istio
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # 발급 파이프라인 검증용. rate limit 이 없다. 먼저 여기로 성공시키고 prod 로 넘길 것.
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: REPLACE@burty.co.kr
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - dns01:
+          route53:
+            region: ap-northeast-2

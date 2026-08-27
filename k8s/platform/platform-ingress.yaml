@@ -1,0 +1,109 @@
+# 운영 도구 노출 — nginx 의 grafana.conf(서브패스 프록시)를 대체한다.
+#
+# 서브패스(/grafana/) 대신 서브도메인을 쓴다. 서브패스는 Grafana 의
+# GF_SERVER_SERVE_FROM_SUB_PATH, ArgoCD 의 --rootpath, Jenkins 의 prefix 를
+# 각각 맞춰야 해서 깨지기 쉽다. 서브도메인이면 그 설정이 전부 필요 없다.
+#
+# ⚠️ 이 도구들은 인터넷에 그대로 열면 안 된다. 아래 중 하나를 반드시 병행할 것:
+#     - AuthorizationPolicy 로 사내 CIDR 만 허용 (아래 포함)
+#     - OIDC(oauth2-proxy) 를 게이트웨이 앞단에
+#     - 또는 internal LoadBalancer + VPN
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: platform-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port: { number: 80, name: http, protocol: HTTP }
+      hosts:
+        - grafana.burty.co.kr
+        - argocd.burty.co.kr
+        - jenkins.burty.co.kr
+      tls:
+        httpsRedirect: true
+    - port: { number: 443, name: https, protocol: HTTPS }
+      hosts:
+        - grafana.burty.co.kr
+        - argocd.burty.co.kr
+        - jenkins.burty.co.kr
+      tls:
+        mode: SIMPLE
+        credentialName: burty-platform-tls
+        minProtocolVersion: TLSV1_2
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  hosts: [grafana.burty.co.kr]
+  gateways: [istio-system/platform-gateway]
+  http:
+    - route:
+        - destination:
+            host: kube-prometheus-stack-grafana.observability.svc.cluster.local
+            port: { number: 80 }
+      timeout: 60s
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  hosts: [argocd.burty.co.kr]
+  gateways: [istio-system/platform-gateway]
+  http:
+    # argocd CLI 는 --grpc-web 로 붙는다. gRPC-Web 은 평범한 HTTP/1.1 POST 라 별도 처리가 없어도 되지만,
+    # 스트리밍(app wait) 때문에 타임아웃을 길게 잡는다.
+    - route:
+        - destination:
+            host: argocd-server.argocd.svc.cluster.local
+            port: { number: 80 }
+      timeout: 0s
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: jenkins
+  namespace: jenkins
+spec:
+  hosts: [jenkins.burty.co.kr]
+  gateways: [istio-system/platform-gateway]
+  http:
+    - route:
+        - destination:
+            host: jenkins.jenkins.svc.cluster.local
+            port: { number: 8080 }
+      # 빌드 로그 스트리밍이 끊기지 않게 타임아웃 해제
+      timeout: 0s
+---
+# 사내/VPN 대역만 허용. CIDR 은 반드시 실제 값으로 교체할 것.
+# ipBlocks 는 X-Forwarded-For 가 아니라 실제 소스 IP 를 본다 →
+# 게이트웨이 Service 에 proxy-protocol 또는 externalTrafficPolicy: Local 이 필요하다.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: platform-tools-allowlist
+  namespace: istio-system
+spec:
+  selector:
+    matchLabels:
+      istio: ingressgateway
+  action: DENY
+  rules:
+    - to:
+        - operation:
+            hosts:
+              - grafana.burty.co.kr
+              - argocd.burty.co.kr
+              - jenkins.burty.co.kr
+      from:
+        - source:
+            notRemoteIpBlocks:
+              - 10.0.0.0/8        # REPLACE — VPC 내부
+              - 192.168.0.0/16    # REPLACE — VPN 대역

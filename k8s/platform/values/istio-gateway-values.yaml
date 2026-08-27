@@ -1,0 +1,37 @@
+# helm upgrade --install istio-ingressgateway istio/gateway -n istio-system -f istio-gateway-values.yaml
+#
+# 기존 global-nginx 컨테이너(80/443 호스트 바인딩)를 대체한다.
+service:
+  type: LoadBalancer
+  ports:
+    - name: status-port
+      port: 15021
+      targetPort: 15021
+    - name: http2
+      port: 80
+      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8443
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    # 클라이언트 실 IP 보존. rate limit 과 감사 로그가 IP 에 의존하므로 필수다.
+    service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: "*"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+podDisruptionBudget:
+  minAvailable: 1

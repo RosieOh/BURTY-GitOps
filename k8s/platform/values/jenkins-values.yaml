@@ -1,0 +1,81 @@
+# helm upgrade --install jenkins jenkins/jenkins -n jenkins -f jenkins-values.yaml
+#
+# EC2 Jenkins → 클러스터 내부 Jenkins. 에이전트는 파드로 뜨고 죽는다
+# (Jenkinsfile 의 `agent { kubernetes { yaml ... } }` 가 그 정의다).
+controller:
+  # 컨트롤러는 빌드를 실행하지 않는다. 에이전트 파드만 띄운다.
+  numExecutors: 0
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 4Gi
+
+  # Istio 를 안 태우므로 Service 는 ClusterIP 로 두고 VirtualService 로 노출한다
+  # (platform-ingress.yaml). LoadBalancer 로 직접 열지 말 것.
+  serviceType: ClusterIP
+
+  jenkinsUrl: https://jenkins.burty.co.kr
+
+  installPlugins:
+    - kubernetes:4285.v50ed5f624918
+    - workflow-aggregator:600.vb_57cdd26fdd7
+    - git:5.4.1
+    - configuration-as-code:1836.vccda_4a_122a_a_e
+    - credentials-binding:681.vf91669a_32e45
+    - timestamper:1.27
+    - junit:1281.va_5b_e0a_c3d4e2
+    - pipeline-stage-view:2.34
+
+  JCasC:
+    defaultConfig: true
+    configScripts:
+      burty-clouds: |
+        jenkins:
+          clouds:
+            - kubernetes:
+                name: "kubernetes"
+                namespace: "jenkins"
+                jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+                # 에이전트가 컨트롤러에 붙는 채널. 50000 은 차트가 연다.
+                jenkinsTunnel: "jenkins-agent.jenkins.svc.cluster.local:50000"
+                containerCapStr: "10"
+                # 빌드 파드가 뜰 때까지 기다리는 시간. 노드 스케일아웃을 고려해 넉넉히.
+                podRetention: "never"
+                retentionTimeout: 5
+                connectTimeout: 300
+                readTimeout: 300
+      burty-security: |
+        jenkins:
+          # 익명 읽기 금지. 파이프라인 로그에 배포 대상과 이미지 태그가 다 나온다.
+          authorizationStrategy: "loggedInUsersCanDoAnything"
+          securityRealm:
+            local:
+              allowsSignup: false
+        unclassified:
+          location:
+            url: "https://jenkins.burty.co.kr"
+
+  persistence:
+    enabled: true
+    size: 30Gi
+
+agent:
+  # 에이전트 정의는 Jenkinsfile 안의 podTemplate 이 소유한다.
+  # 여기서 기본값을 강하게 잡으면 파이프라인 정의와 어긋나 디버깅이 어려워진다.
+  enabled: true
+  namespace: jenkins
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+serviceAccount:
+  create: true
+  name: jenkins
+
+rbac:
+  create: true
+  readSecrets: false   # 컨트롤러가 네임스페이스 시크릿을 통째로 읽지 못하게 한다

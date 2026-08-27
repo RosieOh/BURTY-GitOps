@@ -1,0 +1,34 @@
+# helm upgrade --install tempo grafana/tempo -n observability -f tempo-values.yaml
+#
+# otel-collector 가 트레이스를 여기로 보낸다(otel-collector-values.yaml 의 otlp/tempo).
+# 기존 compose 스택에는 트레이스 저장소가 아예 없어서 OTel Collector 가 로그로만 뱉고
+# 버리고 있었다 — 이체 지연을 span 단위로 추적할 수 없던 이유다.
+tempo:
+  retention: 168h   # 7d. 트레이스는 로그보다 짧게 가져간다(용량 대비 효용).
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: REPLACE-burty-tempo
+        region: ap-northeast-2
+        # IRSA 사용 — access_key/secret_key 를 values 에 두지 말 것.
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  # trace → metrics. RED 지표를 트레이스에서 직접 뽑아 Grafana 에서 span 단위로 본다.
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE:role/burty-tempo

@@ -1,0 +1,55 @@
+# helm upgrade --install opentelemetry-collector open-telemetry/opentelemetry-collector \
+#   -n observability -f otel-collector-values.yaml
+#
+# 기존 infra/observability/otel-collector-config.yml 이전.
+# 원본은 exporters 가 logging 뿐이라 트레이스가 사실상 버려지고 있었다 —
+# Tempo 로 내보내 Grafana 에서 실제로 볼 수 있게 한다.
+mode: deployment
+replicaCount: 2
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  processors:
+    batch:
+      timeout: 5s
+      send_batch_size: 1024
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 20
+    k8sattributes:
+      # 트레이스에 pod/namespace/deployment 를 자동으로 붙인다.
+      extract:
+        metadata:
+          - k8s.namespace.name
+          - k8s.pod.name
+          - k8s.deployment.name
+  exporters:
+    otlp/tempo:
+      endpoint: tempo.observability.svc.cluster.local:4317
+      tls:
+        insecure: true
+    debug:
+      verbosity: basic
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8sattributes, batch]
+        exporters: [otlp/tempo]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi

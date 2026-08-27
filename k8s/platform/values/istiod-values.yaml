@@ -1,0 +1,46 @@
+# helm upgrade --install istiod istio/istiod -n istio-system -f istiod-values.yaml
+#
+# base/istio/telemetry.yaml 이 참조하는 provider 이름(otel-tracing, envoy, prometheus)이
+# 여기 extensionProviders 에 정의돼 있어야 한다. 이름이 어긋나면 Telemetry 가 조용히 무시된다.
+meshConfig:
+  # 액세스 로그를 stdout 으로 — nginx access.log 파일 대체. Promtail 이 컨테이너 로그로 수집한다.
+  accessLogFile: /dev/stdout
+  accessLogEncoding: JSON
+
+  # 앱 메트릭(8080/actuator/prometheus)을 envoy 메트릭과 합쳐 15020 에 노출.
+  # PodMonitor 가 이걸 전제로 한다. false 로 바꾸면 앱 메트릭이 사라진다.
+  enablePrometheusMerge: true
+
+  defaultConfig:
+    # 앱 컨테이너보다 사이드카를 먼저 Ready 로. 부팅 중 아웃바운드 실패를 막는다.
+    holdApplicationUntilProxyStarts: true
+    # 종료 시 인플라이트 요청 배수 시간. 앱 graceful shutdown(30s)보다 길어야 한다.
+    terminationDrainDuration: 45s
+    proxyMetadata:
+      # 활성 커넥션이 0이 되면 즉시 종료 — 배포 시 잔여 사이드카가 남지 않는다.
+      EXIT_ON_ZERO_ACTIVE_CONNECTIONS: "true"
+
+  # 등록되지 않은 외부 목적지 차단.
+  # 처음에는 ALLOW_ANY 로 띄우고, ServiceEntry(base/istio/serviceentry.yaml)가 전부 갖춰진 걸
+  # 확인한 뒤 REGISTRY_ONLY 로 조인다. 반대로 하면 오픈뱅킹 호출이 통째로 죽는다.
+  outboundTrafficPolicy:
+    mode: ALLOW_ANY
+
+  extensionProviders:
+    - name: otel-tracing
+      opentelemetry:
+        service: opentelemetry-collector.observability.svc.cluster.local
+        port: 4317
+    - name: envoy
+      envoyFileAccessLog:
+        path: /dev/stdout
+    - name: prometheus
+      prometheus: {}
+
+pilot:
+  resources:
+    requests:
+      cpu: 300m
+      memory: 1Gi
+  autoscaleMin: 2
+  autoscaleMax: 5

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 애플리케이션 코드 이슈
+    url: https://github.com/FINNECT-BURTY/BURTY_Interface_V2/issues
+    about: 앱 버그·기능 요청은 애플리케이션 레포에 등록하세요. 이 레포는 배포 인프라만 다룹니다.

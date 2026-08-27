@@ -1,0 +1,29 @@
+name: 🚚 전환 작업
+description: docker compose → Kubernetes 전환 체크리스트 항목
+title: "FEAT: "
+labels: ["type:feat", "migration"]
+body:
+  - type: textarea
+    id: from_to
+    attributes:
+      label: 무엇에서 무엇으로
+      description: "예: nginx limit_req → Envoy global rate limit"
+      value: |
+        - 기존:
+        - 대체:
+    validations: { required: true }
+  - type: textarea
+    id: gap
+    attributes:
+      label: 의미 차이
+      description: 기존 구성과 동작이 달라지는 지점. 없으면 "없음".
+    validations: { required: true }
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 기준
+      value: |
+        - [ ] 매니페스트 작성
+        - [ ] dev 검증
+        - [ ] prod 적용
+        - [ ] 런북 갱신

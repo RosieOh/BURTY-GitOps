@@ -1,0 +1,42 @@
+name: 🔧 인프라 작업
+description: 클러스터·매니페스트·파이프라인 변경 작업
+title: "CHORE: "
+labels: ["type:chore"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 영역
+      options: [k8s, istio, argocd, jenkins, observability, security, cert-manager, storage]
+    validations: { required: true }
+  - type: dropdown
+    id: env
+    attributes:
+      label: 대상 환경
+      options: [dev, prod, both, platform]
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: 무엇
+      description: 바꿀 대상과 범위
+    validations: { required: true }
+  - type: textarea
+    id: why
+    attributes:
+      label: 왜
+      description: 지금 이걸 해야 하는 이유. 안 하면 무슨 일이 생기는지.
+    validations: { required: true }
+  - type: textarea
+    id: rollback
+    attributes:
+      label: 롤백 방법
+      description: 실패했을 때 되돌리는 절차. prod 변경이면 필수.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 확인
+      options:
+        - label: "`kustomize build` 로 렌더링을 확인했다"
+        - label: 무중단 배포에 영향이 없다 (있다면 본문에 명시)
+        - label: 시크릿 값을 평문으로 커밋하지 않았다

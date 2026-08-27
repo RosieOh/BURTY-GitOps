@@ -1,0 +1,39 @@
+name: 🐛 장애 / 오작동
+description: 배포된 환경에서 발생한 문제
+title: "FIX: "
+labels: ["type:fix", "priority:P1"]
+body:
+  - type: dropdown
+    id: env
+    attributes:
+      label: 발생 환경
+      options: [prod, dev, platform]
+    validations: { required: true }
+  - type: input
+    id: alert
+    attributes:
+      label: 관련 알람
+      description: "예: BurtyDbConnectionPoolExhausted, BurtyTransferResultUnknown"
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 증상
+      description: 관측된 사실만. 추정은 아래 칸에.
+    validations: { required: true }
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 근거
+      description: "kubectl / argocd / istioctl 출력, Grafana 링크, 로그"
+      render: shell
+  - type: textarea
+    id: impact
+    attributes:
+      label: 영향 범위
+      description: 영향받은 사용자·기능·기간. 이체가 걸렸다면 반드시 명시.
+    validations: { required: true }
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: 임시 조치
+      description: 이미 취한 조치가 있다면

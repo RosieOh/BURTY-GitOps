@@ -79,7 +79,7 @@ for line in txt.splitlines():
         cur['description'] = line.split(':',1)[1].strip().strip('"')
 if cur: print(f"{cur.get('name','')}\t{cur.get('color','')}\t{cur.get('description','')}")
 PY
-    [ -z "$name" ] && continue
+    if [ -z "$name" ]; then continue; fi
     if gh label create "$name" --repo "$SLUG" --color "$color" --description "$desc" >/dev/null 2>&1; then
       ok "$name"
     else
@@ -99,7 +99,7 @@ cmd_milestones() {
   log "마일스톤 생성"
   # 순서가 곧 전환 순서다. 앞 단계가 끝나야 다음이 의미가 있다.
   while IFS='|' read -r title due desc; do
-    [ -z "$title" ] && continue
+    if [ -z "$title" ]; then continue; fi
     if [ -n "$(milestone_number "$title")" ]; then
       skip "$title"
     else

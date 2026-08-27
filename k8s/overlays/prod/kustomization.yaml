@@ -26,3 +26,9 @@ patches:
 # replicas 는 여기서 고정하지 않는다. HPA(min 2 / max 6)가 소유하고,
 # ArgoCD Application 의 ignoreDifferences 가 /spec/replicas 를 무시하게 되어 있다.
 # 여기서 count 를 박으면 sync 마다 HPA 가 늘려놓은 파드를 되돌린다.
+
+# 카나리 배포 — 활성화하려면 아래 주석을 해제한다.
+# api 트래픽의 5% 가 canary subset 으로 흐르고, 인증·문서·헬스는 stable 에 고정된다.
+# 되돌리기: 이 블록을 다시 주석 처리하고 sync (카나리 Deployment 가 prune 된다).
+# components:
+#   - ../../components/canary

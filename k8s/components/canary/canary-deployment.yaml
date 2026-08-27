@@ -1,0 +1,115 @@
+# stable 과 동일한 스펙에 label 만 version: canary 로 바꾼 워크로드.
+#
+# Service(burty-api)의 selector 는 app.kubernetes.io/name 만 보므로 이 파드도 엔드포인트에
+# 포함된다. 트래픽 분배는 DestinationRule 의 subset 과 VirtualService 의 weight 가 결정한다.
+#
+# HPA 는 Deployment/burty-api 만 대상으로 하므로 카나리는 스케일되지 않는다. 의도한 동작이다 —
+# 카나리는 "표본"이지 용량이 아니다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: burty-api-canary
+  labels:
+    app.kubernetes.io/name: burty-api
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+      version: canary
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: burty-api
+        app.kubernetes.io/component: backend
+        version: canary
+      annotations:
+        proxy.istio.io/config: |
+          holdApplicationUntilProxyStarts: true
+          terminationDrainDuration: 45s
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      serviceAccountName: burty-api
+      terminationGracePeriodSeconds: 75
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: burty-api
+          # 이미지는 overlay 의 images 트랜스포머가 stable 과 동일하게 덮어쓴다.
+          # 카나리에 "다음 버전"을 넣으려면 overlay 에서 이 Deployment 만 별도 태그로 지정할 것.
+          image: ghcr.io/rosieoh/burty-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: burty-config
+            - secretRef:
+                name: burty-secret
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.name=BURTY,service.namespace=$(POD_NAMESPACE),service.instance.id=$(POD_NAME),deployment.track=canary
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 300m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: tmp,     mountPath: /tmp }
+            - { name: logs,    mountPath: /app/logs }
+            - { name: uploads, mountPath: /app/uploads }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir:
+            sizeLimit: 2Gi
+        # stable 과 같은 업로드 저장소를 공유해야 한다. RWX PVC 전제.
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: burty-uploads

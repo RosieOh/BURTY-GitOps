@@ -1,0 +1,23 @@
+# 가중치 기반 카나리. overlay 에서 opt-in 한다.
+#
+#   # k8s/overlays/prod/kustomization.yaml
+#   components:
+#     - ../../components/canary
+#
+# 활성화하면 api 트래픽의 5% 가 canary subset 으로 흐른다.
+# 비율을 바꾸려면 virtualservice-patch.yaml 의 weight 를 수정한다(합이 100 이어야 함).
+#
+# 되돌리기: components 줄을 지우고 sync. 카나리 Deployment 가 prune 되고
+# 트래픽은 stable 100% 로 복귀한다.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - canary-deployment.yaml
+
+patches:
+  - path: virtualservice-patch.yaml
+    target:
+      group: networking.istio.io
+      kind: VirtualService
+      name: burty

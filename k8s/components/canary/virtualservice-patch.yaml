@@ -1,0 +1,64 @@
+# ⚠️ 인덱스 기반 패치다. base/istio/virtualservice.yaml 의 라우트 순서에 의존한다.
+#      /spec/http/0 actuator-block   (route 없음 — directResponse)
+#      /spec/http/1 auth-ratelimited
+#      /spec/http/2 api
+#      /spec/http/3 docs
+#      /spec/http/4 health
+#      /spec/http/5 frontend         (다른 서비스 — 건드리지 않음)
+#    라우트를 추가·재배열하면 이 패치를 반드시 같이 고쳐야 한다.
+#
+# 모든 op 가 `replace` 인 이유: kustomize 의 JSON6902 구현은 `add` 로 없는 키를 만들 때
+# 중첩 경로에서 "doc is missing path" 로 실패한다. route 배열 전체를 갈아끼우는 편이 확실하다.
+#
+# 정책:
+#   - api 라우트만 카나리로 흘린다 (95 / 5)
+#   - 인증·문서·헬스는 stable 고정. 세션과 토큰이 걸린 경로에서 버전이 섞이면
+#     장애 원인 추적이 불가능해진다.
+#   - subset 을 명시하지 않으면 두 버전 파드에 그냥 분산된다. "고정"은 명시해야 생긴다.
+
+# auth → stable 고정
+- op: replace
+  path: /spec/http/1/route
+  value:
+    - destination:
+        host: burty-api
+        port:
+          number: 8080
+        subset: stable
+
+# api → 가중치 분배 (합이 100 이어야 한다)
+- op: replace
+  path: /spec/http/2/route
+  value:
+    - destination:
+        host: burty-api
+        port:
+          number: 8080
+        subset: stable
+      weight: 95
+    - destination:
+        host: burty-api
+        port:
+          number: 8080
+        subset: canary
+      weight: 5
+
+# docs → stable 고정
+- op: replace
+  path: /spec/http/3/route
+  value:
+    - destination:
+        host: burty-api
+        port:
+          number: 8080
+        subset: stable
+
+# health → stable 고정
+- op: replace
+  path: /spec/http/4/route
+  value:
+    - destination:
+        host: burty-api
+        port:
+          number: 8080
+        subset: stable

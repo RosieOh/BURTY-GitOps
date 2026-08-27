@@ -31,6 +31,8 @@ spec:
       minHealthPercent: 50
     loadBalancer:
       simple: LEAST_REQUEST
+  # subset 은 components/canary 가 사용한다. 컴포넌트를 켜지 않으면 라우트가 subset 을
+  # 지정하지 않으므로 두 버전 파드에 그냥 분산된다 — "stable 고정"은 명시해야 생긴다.
   subsets:
     - name: stable
       labels:

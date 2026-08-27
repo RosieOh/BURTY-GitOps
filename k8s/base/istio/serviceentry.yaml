@@ -1,0 +1,72 @@
+# 외부 의존성을 메시 레지스트리에 등록한다.
+#
+# 왜 필요한가:
+#   - meshConfig.outboundTrafficPolicy.mode=REGISTRY_ONLY 로 두면 여기 없는 목적지로는
+#     나가지 못한다. 침해 시 데이터 반출 경로를 좁히는 가장 값싼 통제다.
+#   - 등록하면 외부 호출도 Istio 메트릭/트레이스에 잡힌다(오픈뱅킹 지연을 Grafana 에서 본다).
+#
+# ALLOW_ANY 로 운영할 거라면 이 파일은 관측 목적으로만 유지해도 된다.
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-openbanking
+spec:
+  hosts:
+    - testapi.openbanking.or.kr
+    - openapi.openbanking.or.kr
+  ports:
+    - number: 443
+      name: https
+      protocol: TLS
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-social-login
+spec:
+  hosts:
+    - kauth.kakao.com
+    - kapi.kakao.com
+    - accounts.google.com
+    - oauth2.googleapis.com
+    - www.googleapis.com
+    - nid.naver.com
+    - openapi.naver.com
+    - appleid.apple.com
+  ports:
+    - number: 443
+      name: https
+      protocol: TLS
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-apis
+spec:
+  hosts:
+    - api.openai.com
+    - www.youthcenter.go.kr
+  ports:
+    - number: 443
+      name: https
+      protocol: TLS
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1
+kind: ServiceEntry
+metadata:
+  name: external-smtp
+spec:
+  hosts:
+    - smtp.gmail.com
+  ports:
+    - number: 587
+      name: smtp
+      protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL

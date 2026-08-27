@@ -1,0 +1,40 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: burty-api
+spec:
+  host: burty-api
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 200
+        connectTimeout: 3s
+        tcpKeepalive:
+          time: 300s
+          interval: 60s
+      http:
+        http1MaxPendingRequests: 200
+        http2MaxRequests: 400
+        # 커넥션을 무한 재사용하면 스케일아웃 시 신규 파드로 부하가 안 흐른다.
+        maxRequestsPerConnection: 100
+        maxRetries: 0
+        idleTimeout: 60s
+    # 5xx 를 연속으로 내는 파드를 로드밸런싱에서 임시 제외한다.
+    # (Hikari 풀 고갈로 한 파드만 죽는 상황에서 효과가 크다)
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+    loadBalancer:
+      simple: LEAST_REQUEST
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary

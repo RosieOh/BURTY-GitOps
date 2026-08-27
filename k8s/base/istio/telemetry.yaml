@@ -1,0 +1,33 @@
+apiVersion: telemetry.istio.io/v1
+kind: Telemetry
+metadata:
+  name: burty-telemetry
+spec:
+  # ── 트레이싱 ──────────────────────────────────────────────────────────────
+  # 앱(Micrometer/OTLP)과 동일한 20% 샘플링. 두 값이 어긋나면 트레이스가 끊겨 보인다.
+  tracing:
+    - providers:
+        - name: otel-tracing
+      randomSamplingPercentage: 20.0
+      customTags:
+        burty.request_id:
+          header:
+            name: X-Request-Id
+  # ── 액세스 로그 ───────────────────────────────────────────────────────────
+  # nginx access.log 대체. stdout → Promtail → Loki 로 흐른다.
+  accessLogging:
+    - providers:
+        - name: envoy
+      filter:
+        # 헬스체크/메트릭 노이즈 제거
+        expression: 'response.code >= 400 || !(request.url_path.startsWith("/health"))'
+  # ── 메트릭 ────────────────────────────────────────────────────────────────
+  metrics:
+    - providers:
+        - name: prometheus
+      overrides:
+        - match:
+            metric: ALL_METRICS
+          tagOverrides:
+            request_protocol:
+              operation: REMOVE

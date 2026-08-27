@@ -1,0 +1,45 @@
+# nginx 의 server{listen 80/443} 블록을 대체한다.
+#
+# TLS 인증서:
+#   기존 certbot(호스트 볼륨) → cert-manager 의 Certificate 로 이관한다.
+#   credentialName 이 가리키는 Secret 은 **istio-system**(게이트웨이 파드가 있는 네임스페이스)에
+#   있어야 한다. 앱 네임스페이스가 아니다. → overlays/prod/certificate.yaml
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: burty-gateway
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - burty.co.kr
+        - www.burty.co.kr
+      # nginx 의 `return 301 https://...` 와 동일.
+      # ACME HTTP-01 은 더 이상 필요 없다(cert-manager 는 DNS-01 또는 별도 solver Ingress 사용).
+      tls:
+        httpsRedirect: true
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - burty.co.kr
+        - www.burty.co.kr
+      tls:
+        mode: SIMPLE
+        credentialName: burty-tls
+        # nginx 의 ssl_protocols TLSv1.2 TLSv1.3 와 동일
+        minProtocolVersion: TLSV1_2
+        maxProtocolVersion: TLSV1_3
+        cipherSuites:
+          - ECDHE-ECDSA-AES128-GCM-SHA256
+          - ECDHE-RSA-AES128-GCM-SHA256
+          - ECDHE-ECDSA-AES256-GCM-SHA384
+          - ECDHE-RSA-AES256-GCM-SHA384
+          - ECDHE-ECDSA-CHACHA20-POLY1305
+          - ECDHE-RSA-CHACHA20-POLY1305

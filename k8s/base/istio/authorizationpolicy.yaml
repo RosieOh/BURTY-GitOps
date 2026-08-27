@@ -1,0 +1,67 @@
+# 1) 기본 거부 — rules 가 없는 ALLOW 정책은 "아무것도 허용하지 않음"을 뜻한다.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-nothing
+spec:
+  {}
+---
+# 2) Ingress Gateway → burty-api 만 허용.
+#    principals 는 SPIFFE ID. 다른 네임스페이스의 파드가 burty-api 를 직접 호출할 수 없다.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingressgateway
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account
+      to:
+        - operation:
+            ports: ["8080"]
+---
+# 3) /actuator 는 메시 내부에서도 차단. nginx 의 `return 404` 를 L7 정책으로 승격한 것.
+#    Prometheus 는 8080 이 아니라 istio-proxy 병합 포트(15020)로 긁으므로 영향 없다.
+#    (15020 은 pilot-agent 가 직접 서빙하며 envoy inbound authz 를 거치지 않는다)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-actuator-from-mesh
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  action: DENY
+  rules:
+    - to:
+        - operation:
+            paths: ["/actuator/*"]
+            notPaths: ["/actuator/health/*"]
+---
+# 4) 프론트엔드용 허용.
+#    allow-nothing 은 네임스페이스 전체 기본 거부라, 같은 네임스페이스에 FE 를 올리면
+#    게이트웨이에서 오는 트래픽까지 막힌다. FE 배포 전에 미리 넣어 둔다
+#    (대상 워크로드가 아직 없으면 이 정책은 아무 효과도 없고 해도 없다).
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingressgateway-frontend
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account
+      to:
+        - operation:
+            ports: ["80"]

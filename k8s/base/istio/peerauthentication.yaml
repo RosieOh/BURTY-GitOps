@@ -1,0 +1,9 @@
+# 네임스페이스 내 모든 워크로드 간 통신을 mTLS 강제.
+# 기존 docker network(global-nginx) 안에서 평문으로 오가던 구간이 전부 암호화된다.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+spec:
+  mtls:
+    mode: STRICT

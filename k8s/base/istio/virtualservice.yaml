@@ -1,0 +1,109 @@
+# nginx location 블록 → Istio HTTPRoute 변환.
+# ⚠️ Istio 는 nginx 와 달리 "가장 구체적인 경로 우선"이 아니라 **위에서 아래로 첫 매치**다.
+#    순서를 바꾸면 라우팅이 조용히 깨진다.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: burty
+spec:
+  hosts:
+    - burty.co.kr
+    - www.burty.co.kr
+  gateways:
+    - burty-gateway
+  http:
+    # ── 1) /actuator 외부 차단 (nginx: `location /actuator/ { return 404; }`) ──
+    - name: actuator-block
+      match:
+        - uri:
+            prefix: /actuator
+      directResponse:
+        status: 404
+        body:
+          string: '{"error":"not_found"}'
+      headers:
+        response:
+          set:
+            content-type: application/json
+
+    # ── 2) 인증 계열 — rate limit 적용 대상 ──────────────────────────────────
+    # nginx: limit_req zone=burty_auth rate=60r/m burst=20
+    # 이 라우트 이름을 EnvoyFilter(ratelimit.yaml)가 참조한다. 바꾸면 같이 바꿀 것.
+    - name: auth-ratelimited
+      match:
+        - uri:
+            regex: ^/api/v1/(auth|admin/auth|sessions)(/.*)?$
+      route:
+        - destination:
+            host: burty-api
+            port:
+              number: 8080
+      timeout: 15s
+      # 돈/세션이 걸린 경로는 자동 재시도하지 않는다. connect-failure 라도 업스트림이
+      # 이미 처리했을 가능성을 배제할 수 없다.
+      retries:
+        attempts: 0
+
+    # ── 3) API 본문 ─────────────────────────────────────────────────────────
+    - name: api
+      match:
+        - uri:
+            prefix: /api/v1/
+      route:
+        - destination:
+            host: burty-api
+            port:
+              number: 8080
+      # 외부 API(오픈뱅킹 5s, AI 8s, 음성 15s) + 재정산 여유
+      timeout: 30s
+      retries:
+        attempts: 0
+
+    # ── 4) Swagger / OpenAPI (prod 는 앱에서 비활성. 라우트는 남겨 404 를 앱이 내게 한다) ──
+    - name: docs
+      match:
+        - uri:
+            prefix: /swagger-ui/
+        - uri:
+            exact: /swagger-ui.html
+        - uri:
+            prefix: /v3/api-docs
+        - uri:
+            prefix: /webjars/
+      route:
+        - destination:
+            host: burty-api
+            port:
+              number: 8080
+      timeout: 15s
+
+    # ── 5) 헬스 (외부 스모크 테스트가 때린다) ───────────────────────────────
+    - name: health
+      match:
+        - uri:
+            exact: /health
+        - uri:
+            prefix: /health/
+      route:
+        - destination:
+            host: burty-api
+            port:
+              number: 8080
+      timeout: 5s
+
+    # ── 6) 프론트엔드 catch-all ─────────────────────────────────────────────
+    # frontend Service 가 아직 없으면 이 라우트만 503 이 된다(기존 nginx 의 502 와 같은 상황).
+    - name: frontend
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: frontend
+            port:
+              number: 80
+      timeout: 15s
+      retries:
+        attempts: 2
+        perTryTimeout: 5s
+        retryOn: connect-failure,refused-stream,5xx

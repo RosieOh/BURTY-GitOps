@@ -1,0 +1,72 @@
+# nginx `limit_req_zone $binary_remote_addr zone=burty_auth rate=60r/m burst=20` 대체.
+#
+# ⚠️ 의미 차이를 반드시 알고 쓸 것:
+#   nginx  : 클라이언트 IP 단위 (per-IP)
+#   아래 것: 게이트웨이 파드 단위 (global token bucket)
+#   → 게이트웨이가 N대면 실질 한도는 N배다. per-IP 가 꼭 필요하면 Envoy **global** rate limit
+#     (envoyproxy/ratelimit + Redis)을 별도 배포하고 descriptor 에 remote_address 를 넣어야 한다.
+#     지금은 크리덴셜 스터핑 완화 목적의 1차 방어선으로 로컬 버킷을 둔다.
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: burty-auth-local-ratelimit
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+    # 1) 필터 자체는 비활성 상태로 삽입한다(전역 적용 방지).
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          filterChain:
+            filter:
+              name: envoy.filters.network.http_connection_manager
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.filters.http.local_ratelimit
+          typed_config:
+            "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+            type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+            value:
+              stat_prefix: burty_auth_rl
+              # filter_enabled 미지정 = 0% → 라우트 단위 override 에서만 동작
+    # 2) auth 라우트에만 실제 버킷을 붙인다. (VirtualService 의 route name 과 일치해야 함)
+    - applyTo: HTTP_ROUTE
+      match:
+        context: GATEWAY
+        routeConfiguration:
+          vhost:
+            route:
+              name: auth-ratelimited
+      patch:
+        operation: MERGE
+        value:
+          typed_per_filter_config:
+            envoy.filters.http.local_ratelimit:
+              "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+              type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+              value:
+                stat_prefix: burty_auth_rl
+                token_bucket:
+                  # 60r/m + burst 20 → 버킷 80, 1분마다 60 리필
+                  max_tokens: 80
+                  tokens_per_fill: 60
+                  fill_interval: 60s
+                filter_enabled:
+                  runtime_key: burty_auth_rl_enabled
+                  default_value:
+                    numerator: 100
+                    denominator: HUNDRED
+                filter_enforced:
+                  runtime_key: burty_auth_rl_enforced
+                  default_value:
+                    numerator: 100
+                    denominator: HUNDRED
+                response_headers_to_add:
+                  - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                    header:
+                      key: x-burty-ratelimit
+                      value: "true"

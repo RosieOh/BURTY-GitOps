@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # 이 레포에는 앱 의존성이 없다. 갱신 대상은 워크플로 액션뿐이다.
+  # 매니페스트의 이미지 태그는 Jenkins 가 갱신하므로 Dependabot 대상이 아니다.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "CHORE"
+    labels:
+      - "type:chore"
+      - "area:security"

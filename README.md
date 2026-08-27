@@ -76,6 +76,28 @@ ArgoCD가 되돌린다(dev는 selfHeal 켜짐). 롤백도 여기서 한다 — `
 
 PR 을 열면 같은 검사가 `.github/workflows/validate.yml` 로 자동 실행된다.
 
+## 브랜치 보호
+
+`main` 에 ruleset("main 보호")이 걸려 있다.
+
+| 규칙 | 효과 |
+|---|---|
+| `deletion` | main 삭제 불가 |
+| `non_fast_forward` | force push 불가 |
+| `required_status_checks` | 매니페스트 검증·정책 검사 통과 필수 |
+
+⚠️ **`required_status_checks` 는 PR 병합뿐 아니라 직접 push 도 막는다.**
+새로 push 되는 커밋에는 아직 체크 결과가 없기 때문이다. 사람은 PR 로 올리면 되지만,
+**Jenkins 는 이미지 태그를 main 에 직접 커밋하므로 bypass 액터 등록이 선행되어야 한다.**
+등록 전에는 배포 파이프라인이 push 단계에서 실패한다.
+
+```bash
+# 현재 룰셋 확인
+gh api repos/RosieOh/BURTY-GitOps/rulesets --jq '.[] | "\(.id) \(.name) \(.enforcement)"'
+```
+
+선택지와 진행 상황은 이슈 "Jenkins 봇을 main 룰셋 bypass 액터로 등록" 에 정리했다.
+
 ## GitHub 부트스트랩
 
 레포·라벨·마일스톤·이슈·프로젝트·PR 을 한 번에 만든다. 멱등하므로 다시 돌려도 안전하다.

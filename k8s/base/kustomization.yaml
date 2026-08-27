@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 네임스페이스는 overlay 가 지정한다.
+# commonLabels 는 selector 까지 오염시킨다(Deployment.spec.selector 는 immutable).
+# 라벨만 붙이고 selector 는 건드리지 않는다.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: burty
+      app.kubernetes.io/managed-by: argocd
+
+resources:
+  - serviceaccount.yaml
+  - configmap.yaml
+  - service.yaml
+  - deployment.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+  - istio
+  - observability
+
+# secret.example.yaml 은 의도적으로 제외. 실제 Secret 은 SealedSecrets/ESO 로 별도 반입한다.
+
+images:
+  - name: ghcr.io/rosieoh/burty-api
+    newTag: latest

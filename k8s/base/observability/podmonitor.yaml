@@ -1,0 +1,32 @@
+# 왜 ServiceMonitor 가 아니라 PodMonitor 인가:
+#   PeerAuthentication STRICT 때문에 Prometheus(사이드카 없음)가 8080 을 직접 긁으면
+#   mTLS 협상 실패로 전부 거부된다. Istio 는 앱 메트릭 + envoy 메트릭을 합쳐
+#   istio-proxy 의 15020(/stats/prometheus)에 평문으로 재노출하므로 그쪽을 긁는다.
+#   (합침 조건: 파드에 prometheus.io/{scrape,port,path} 애노테이션 — deployment.yaml 참고)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: burty-api
+  labels:
+    # kube-prometheus-stack 의 podMonitorSelector 기본값에 맞춘 릴리스 라벨.
+    # 설치 시 릴리스명이 다르면 여기를 바꿀 것.
+    release: kube-prometheus-stack
+spec:
+  # namespaceSelector 를 두지 않는다 = 자기 네임스페이스만.
+  # any:true 로 두면 dev/prod 양쪽 PodMonitor 가 서로의 파드까지 긁어 메트릭이 중복된다.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-api
+  podMetricsEndpoints:
+    # 이름이 아니라 번호로 지정한다. istio-proxy 가 이름으로 선언하는 포트는 15090(envoy 전용)이고,
+    # 앱 메트릭까지 합쳐진 건 15020 인데 이건 named containerPort 로 선언되지 않는다.
+    # port: http-envoy-prom 로 잡으면 JVM/HTTP 메트릭이 통째로 빠진다.
+    - targetPort: 15020
+      path: /stats/prometheus
+      interval: 15s
+      scrapeTimeout: 10s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace

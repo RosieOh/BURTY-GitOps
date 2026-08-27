@@ -1,0 +1,222 @@
+# infra/observability/alert-rules.yml 을 흡수해 하나로 합친 알람 세트.
+#
+# ⚠️ dev/prod 양쪽 네임스페이스에 같은 PrometheusRule 이 배포된다. Prometheus 의 룰 평가는
+#    네임스페이스 스코프가 아니므로 그대로 두면 알람이 두 번 발화한다.
+#    → kube-prometheus-stack values 의 `enforcedNamespaceLabel: namespace` 로 해결한다
+#      (Prometheus Operator 가 모든 expr 에 namespace 매처를 자동 주입).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: burty-api
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    # ── 돈이 걸린 것들. 여기가 울리면 사람이 즉시 봐야 한다. ────────────────────
+    - name: burty.money
+      interval: 30s
+      rules:
+        # 출금됐는지 아닌지 모르는 건. 은행 원장과 수동 대조가 필요하다.
+        - alert: BurtyTransferResultUnknown
+          expr: sum(burty_transfer_reconciliation_total{outcome="manual-review"}) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "이체 결과 미확정 건 발생 — 은행 원장 수동 대조 필요"
+            description: "정산 배치가 재시도를 소진했습니다(reconcile-max-attempts=12). 실제 출금 여부를 은행 원장과 대조하세요."
+            runbook_url: "https://github.com/FINNECT-BURTY/BURTY_Interface_V2/blob/main/docs/operations-runbook.md"
+
+        - alert: BurtyTransferReconciliationBacklog
+          expr: rate(burty_transfer_reconciliation_total{outcome="rescheduled"}[10m]) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "이체 정산 재시도가 계속 쌓이는 중 — 은행 연동 상태 확인"
+
+        - alert: BurtyTransferFailureRateHigh
+          expr: |
+            sum(rate(http_server_requests_seconds_count{application="BURTY",uri=~".*/transfers.*",status=~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(http_server_requests_seconds_count{application="BURTY",uri=~".*/transfers.*"}[5m])), 0.001)
+              > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "이체 API 5xx 비율 5% 초과"
+
+    # ── 데이터 정합성 ────────────────────────────────────────────────────────
+    - name: burty.integrity
+      interval: 60s
+      rules:
+        # DEAD = 알림/이벤트 영구 유실. 조용히 지나가면 안 된다.
+        - alert: BurtyOutboxDeadLetter
+          expr: sum(burty_outbox_dead_total) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "아웃박스 이벤트가 DEAD 로 격리됨 — 발행 실패 확인 필요"
+
+        - alert: BurtyOutboxRetryStorm
+          expr: rate(burty_outbox_retried_total[5m]) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "아웃박스 재시도 급증 — 하위 채널(메일/SMS/푸시) 장애 의심"
+
+        # 토큰 갱신이 멈추면 조용히 연동이 끊기고 사용자는 며칠 뒤에야 안다.
+        - alert: BurtyMyDataTokenRefreshStalled
+          expr: time() - max(burty_mydata_token_refresh_last_success_timestamp_seconds) > 3600
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "마이데이터 토큰 갱신 배치가 1시간 이상 성공하지 못함"
+
+    # ── 가용성 ───────────────────────────────────────────────────────────────
+    - name: burty.availability
+      interval: 30s
+      rules:
+        # PodMonitor 의 job 라벨은 `<namespace>/<podmonitor-name>` 이다.
+        - alert: BurtyApplicationDown
+          expr: up{job=~".*burty-api.*"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "BURTY 인스턴스 응답 없음 ({{ $labels.pod }})"
+
+        - alert: BurtyApiAbsent
+          expr: absent(up{job=~".*burty-api.*"} == 1)
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "BURTY 메트릭 수집 대상이 하나도 없음"
+            description: "파드 전멸 또는 PodMonitor 라벨 불일치. `kubectl get podmonitor -A` 와 Prometheus Targets 를 확인하세요."
+
+        - alert: BurtyHighErrorRate
+          expr: |
+            sum(rate(http_server_requests_seconds_count{application="BURTY",status=~"5.."}[5m]))
+              /
+            clamp_min(sum(rate(http_server_requests_seconds_count{application="BURTY"}[5m])), 0.001)
+              > 0.02
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "전체 5xx 비율 2% 초과"
+
+        - alert: BurtyLatencyP95High
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_server_requests_seconds_bucket{application="BURTY"}[5m]))
+            ) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "p95 응답시간 2초 초과"
+
+    # ── 리소스 ───────────────────────────────────────────────────────────────
+    - name: burty.resources
+      interval: 30s
+      rules:
+        # Hikari 대기 큐가 쌓이면 곧 connection-timeout(3s) 폭탄이 온다. 선행 지표다.
+        - alert: BurtyDbConnectionPoolExhausted
+          expr: hikaricp_connections_pending{application="BURTY"} > 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "DB 커넥션 풀 대기 발생 ({{ $labels.pod }})"
+            description: "커넥션을 오래 잡는 코드(leak-detection-threshold=20s 경고 로그) 또는 DB_POOL_MAX 상향을 확인하세요."
+
+        - alert: BurtyJvmHeapHigh
+          expr: |
+            sum by (pod) (jvm_memory_used_bytes{application="BURTY",area="heap"})
+              /
+            sum by (pod) (jvm_memory_max_bytes{application="BURTY",area="heap"})
+              > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "JVM heap 90% 초과 ({{ $labels.pod }})"
+
+        - alert: BurtyPodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{container="burty-api"}[15m]) > 2
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "burty-api 재시작 반복 ({{ $labels.pod }})"
+
+        # OOMKilled 는 재시작 알람과 별개로 잡는다. 원인이 전혀 다르다.
+        - alert: BurtyPodOOMKilled
+          expr: |
+            kube_pod_container_status_last_terminated_reason{reason="OOMKilled",container="burty-api"} == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "burty-api OOMKilled ({{ $labels.pod }}) — limits.memory 또는 MaxRAMPercentage 재검토"
+
+    # ── 외부 연동 ────────────────────────────────────────────────────────────
+    - name: burty.integration
+      interval: 30s
+      rules:
+        - alert: BurtyCircuitBreakerOpen
+          expr: resilience4j_circuitbreaker_state{application="BURTY",state="open"} == 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "서킷브레이커 OPEN — 외부 연동 {{ $labels.name }} 중단"
+
+    # ── 메시 / 인증서 ────────────────────────────────────────────────────────
+    - name: burty.mesh
+      interval: 30s
+      rules:
+        - alert: BurtyGateway5xx
+          expr: |
+            sum(rate(istio_requests_total{destination_service_name="burty-api",response_code=~"5.."}[5m])) > 1
+          for: 5m
+          annotations:
+            summary: "Istio 게이트웨이 → burty-api 5xx 증가"
+          labels:
+            severity: warning
+
+        # 사이드카가 없으면 mTLS/정책/메트릭이 전부 무력화된다. 조용히 깨지는 유형이라 감시한다.
+        - alert: BurtySidecarMissing
+          expr: |
+            count(kube_pod_container_info{container="burty-api"})
+              -
+            count(kube_pod_container_info{container="istio-proxy"} * on(pod, namespace) group_left()
+                  kube_pod_container_info{container="burty-api"})
+              > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "사이드카 없이 뜬 burty-api 파드가 있음 — 네임스페이스 istio-injection 라벨 확인"
+
+        - alert: BurtyTlsCertExpiringSoon
+          expr: (certmanager_certificate_expiration_timestamp_seconds{name=~"burty.*-tls"} - time()) / 86400 < 14
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.name }} 인증서 만료 14일 미만"
+
+        - alert: BurtyCertNotReady
+          expr: certmanager_certificate_ready_status{condition="False",name=~"burty.*-tls"} == 1
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ $labels.name }} 인증서 발급 실패 — ACME challenge 확인"

@@ -76,6 +76,24 @@ ArgoCD가 되돌린다(dev는 selfHeal 켜짐). 롤백도 여기서 한다 — `
 
 PR 을 열면 같은 검사가 `.github/workflows/validate.yml` 로 자동 실행된다.
 
+## GitHub 부트스트랩
+
+레포·라벨·마일스톤·이슈·프로젝트·PR 을 한 번에 만든다. 멱등하므로 다시 돌려도 안전하다.
+
+```bash
+gh auth login                  # 최초 1회 (브라우저 필요)
+./scripts/gh-bootstrap.sh all
+
+# 개별 실행
+./scripts/gh-bootstrap.sh labels
+./scripts/gh-bootstrap.sh issues
+```
+
+기본값은 `RosieOh/BURTY-GitOps`, private. 바꾸려면 환경변수로:
+`GITOPS_OWNER`, `GITOPS_REPO_NAME`, `GITOPS_VISIBILITY`.
+
+전환 진행 상황은 [docs/migration-checklist.md](docs/migration-checklist.md) 를 따라간다.
+
 ## 최초 설치 순서
 
 순서를 지킬 것. 사이드카 주입은 **네임스페이스 라벨이 먼저** 붙어야 동작한다.

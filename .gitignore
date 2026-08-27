@@ -5,7 +5,8 @@ secret.yaml
 .env.*
 !.env.example
 
-# kustomize / helm 렌더링 산출물
+# kustomize / helm 렌더링 산출물 (scripts/validate.sh 가 .rendered/ 에 쓴다)
+.rendered/
 /rendered/
 *.rendered.yaml
 

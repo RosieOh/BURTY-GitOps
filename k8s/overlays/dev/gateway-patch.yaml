@@ -1,0 +1,24 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: burty-gateway
+spec:
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - dev.burty.co.kr
+      tls:
+        httpsRedirect: true
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        - dev.burty.co.kr
+      tls:
+        mode: SIMPLE
+        credentialName: burty-dev-tls
+        minProtocolVersion: TLSV1_2

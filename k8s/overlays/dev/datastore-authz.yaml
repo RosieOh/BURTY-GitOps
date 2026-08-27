@@ -1,0 +1,37 @@
+# base 의 allow-nothing 때문에 burty-api → MariaDB/Redis 도 막힌다. 명시적으로 뚫는다.
+# Istio WorkloadSelector 는 matchLabels 만 지원한다(matchExpressions 없음) → 워크로드별로 하나씩.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api-to-mariadb
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-mariadb
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/burty-dev/sa/burty-api
+      to:
+        - operation:
+            ports: ["3306"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api-to-redis
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: burty-redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/burty-dev/sa/burty-api
+      to:
+        - operation:
+            ports: ["6379"]

@@ -1,0 +1,8 @@
+# dev 는 호스트만 갈아끼운다. 라우팅 규칙은 base 를 그대로 쓴다.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: burty
+spec:
+  hosts:
+    - dev.burty.co.kr

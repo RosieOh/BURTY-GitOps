@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: burty-dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - mariadb.yaml
+  - redis.yaml
+  - datastore-authz.yaml
+
+
+images:
+  - name: ghcr.io/rosieoh/burty-api
+    newName: ghcr.io/rosieoh/burty-api
+    newTag: develop   # Jenkins 가 `kustomize edit set image` 로 커밋 SHA 태그를 밀어넣는다
+
+patches:
+  - path: deployment-patch.yaml
+  - path: configmap-patch.yaml
+  - path: virtualservice-patch.yaml
+  - path: gateway-patch.yaml
+  # replicas=1 인 dev 에서 PDB(minAvailable:1)는 노드 드레인을 영구히 막는다 → 제거.
+  - target:
+      kind: PodDisruptionBudget
+      name: burty-api
+    patch: |
+      $patch: delete
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: burty-api
+  # dev 는 HPA 없이 1대 고정.
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: burty-api
+    patch: |
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: burty-api
+
+# dev 시크릿 — 전부 스텁/더미 값이라 커밋해도 무방하다.
+# 실제 외부 연동 키가 필요해지는 순간 이 블록을 지우고 SealedSecret 으로 전환할 것.
+secretGenerator:
+  - name: burty-secret
+    literals:
+      - DB_HOST=burty-mariadb
+      - DB_USER=burty
+      - DB_PASSWORD=dev-only-not-a-real-password
+      - REDIS_HOST=burty-redis
+      - REDIS_PASSWORD=dev-only-redis-password
+      - JWT_SECRET=dev-only-jwt-secret-key-minimum-256-bits-long-value
+      - BURTY_SIGN_SECRET=dev-only-burty-sign-secret
+      - ADMIN_SETUP_KEY=dev-only-admin-setup-key
+      - BURTY_FIELD_ENCRYPTION_KEY=dev-only-field-encryption-key-32
+      - BURTY_SOCIAL_STUB_MODE=true
+      - BURTY_AI_OPENAI_STUB_MODE=true
+      - OPENAI_API_KEY=
+      - BURTY_YOUTH_CENTER_API_KEY=
+      - MAIL_USERNAME=
+      - MAIL_PASSWORD=
+
+generatorOptions:
+  # ConfigMap/Secret 해시 접미사를 끈다. 켜두면 값이 바뀔 때마다 Deployment 가
+  # 자동 롤링되어 좋지만, ArgoCD diff 에 매번 새 리소스가 뜨고 이전 것이 남는다.
+  # 자동 롤링을 원하면 이 줄을 지우고 prune=true 를 신뢰할 것.
+  disableNameSuffixHash: true

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: burty-dev
+  labels:
+    # 이 라벨이 있어야 사이드카가 자동 주입된다. 없으면 Istio 정책이 전부 무력화된다.
+    istio-injection: enabled
+    kubernetes.io/metadata.name: burty-dev

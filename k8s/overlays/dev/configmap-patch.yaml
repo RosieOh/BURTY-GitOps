@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: burty-config
+data:
+  SPRING_PROFILES_ACTIVE: "dev"
+  # dev 는 스키마를 Flyway 로 굴리되 드리프트를 바로 보고 싶으므로 validate 유지.
+  SPRING_JPA_DDLAUTO: "validate"
+
+  APP_BASE_URL: "https://dev.burty.co.kr"
+  FRONTEND_URL: "https://dev.burty.co.kr"
+  CORS_ALLOWED_ORIGINS: "https://dev.burty.co.kr,http://localhost:3000,http://localhost:5173"
+  COOKIE_DOMAIN: ".burty.co.kr"
+  COOKIE_SECURE: "true"
+  WEBAUTHN_RP_ID: "dev.burty.co.kr"
+
+  # in-cluster StatefulSet 의 headless 서비스 주소
+  DB_HOST: "burty-mariadb"
+  REDIS_HOST: "burty-redis"
+  DB_POOL_MAX: "10"
+  DB_POOL_MIN: "2"
+
+  # dev 는 전량 샘플링해서 트레이스를 다 본다.
+  TRACING_SAMPLING_PROBABILITY: "1.0"
+
+  BURTY_GRAFANA_ENABLED: "false"
+
+  JAVA_OPTS: >-
+    -XX:MaxRAMPercentage=70
+    -XX:+ExitOnOutOfMemoryError
+    -Duser.timezone=Asia/Seoul
+    -Dfile.encoding=UTF-8
